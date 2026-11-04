@@ -13,13 +13,17 @@ import com.example.data.WeeklyAnalyticsData
 import com.example.reminder.TaskAlarmScheduler
 import com.example.ui.components.InAppBannerData
 import com.example.ui.components.StarterTemplate
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.Calendar
 
 enum class TaskFilter(val label: String) {
@@ -59,26 +63,42 @@ class TaskViewModel : ViewModel() {
     private val _inAppBanner = MutableStateFlow<InAppBannerData?>(null)
     val inAppBanner: StateFlow<InAppBannerData?> = _inAppBanner.asStateFlow()
 
-    private val _weeklyAnalytics = MutableStateFlow(
-        WeeklyAnalyticsData(
-            dailyProgressList = emptyList(),
-            totalCompletedThisWeek = 0,
-            totalScheduledThisWeek = 0,
-            overallCompletionPercent = 0,
-            currentStreakDays = 0,
-            highPriorityCompleted = 0,
-            mediumPriorityCompleted = 0,
-            lowPriorityCompleted = 0
+    val allTasks: StateFlow<List<TaskEntity>> = repository.allTasks
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
         )
-    )
-    val weeklyAnalytics: StateFlow<WeeklyAnalyticsData> = _weeklyAnalytics.asStateFlow()
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val weeklyAnalytics: StateFlow<WeeklyAnalyticsData> = repository.allTasks
+        .mapLatest { tasks ->
+            withContext(Dispatchers.Default) {
+                repository.computeWeeklyAnalytics(tasks)
+            }
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = WeeklyAnalyticsData(
+                dailyProgressList = emptyList(),
+                totalCompletedThisWeek = 0,
+                totalScheduledThisWeek = 0,
+                overallCompletionPercent = 0,
+                currentStreakDays = 0,
+                highPriorityCompleted = 0,
+                mediumPriorityCompleted = 0,
+                lowPriorityCompleted = 0
+            )
+        )
 
     val uiState: StateFlow<DashboardUiState> = combine(
         repository.allTasks,
         _activeFilter,
         _activeCategory,
-        _searchQuery
-    ) { allTasks, filter, category, query ->
+        _searchQuery,
+        weeklyAnalytics
+    ) { allTasks, filter, category, query, analytics ->
         val now = System.currentTimeMillis()
         val calendar = Calendar.getInstance().apply {
             set(Calendar.HOUR_OF_DAY, 0)
@@ -123,17 +143,12 @@ class TaskViewModel : ViewModel() {
             matchesFilter && matchesCategory && matchesQuery
         }
 
-        // Compute weekly metrics async
-        viewModelScope.launch {
-            _weeklyAnalytics.value = repository.computeWeeklyAnalytics(allTasks)
-        }
-
         DashboardUiState(
             tasks = filtered,
             completedCountToday = completedToday,
             totalCountToday = totalToday,
             completionRatioToday = ratio,
-            streakDays = _weeklyAnalytics.value.currentStreakDays,
+            streakDays = analytics.currentStreakDays,
             activeFilter = filter,
             activeCategory = category,
             searchQuery = query,

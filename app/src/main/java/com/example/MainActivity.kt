@@ -169,7 +169,6 @@ fun MainAppContainer(viewModel: TaskViewModel) {
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(innerPadding)
-                    .statusBarsPadding()
             ) {
                 // Directional Horizontal Sliding Page Transitions
                 AnimatedContent(

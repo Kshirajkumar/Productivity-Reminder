@@ -1,0 +1,925 @@
+This is one of the most important problems to fix in ChronoTask. If the reminder doesn't appear when its scheduled time arrives, the app cannot fulfil its main purpose.
+
+I want to distinguish three situations because Android handles them differently:
+Phone state	Expected behaviour
+Screen ON, phone unlocked	Immediately display the full-screen reminder
+Screen OFF, phone locked	Wake the display and show the reminder, if Android permits full-screen access
+Phone powered OFF	Cannot display anything. Android apps cannot execute while the device is shut down.
+
+Important: We can make ChronoTask behave like a reliable alarm app when the display is off or the phone is locked, subject to Android and Samsung restrictions. We cannot make it display an alert while the phone is completely powered off.
+1. Why ChronoTask's full-screen reminder is failing
+I inspected the actual implementation in your repository. I found several specific problems.
+Current reminder pipeline
+Needs correction
+
+TaskAlarmScheduler.kt
+Schedules RTC_WAKEUP alarm
+
+TaskAlarmReceiver.kt
+Receives scheduled broadcast
+
+Direct activity launch
+Background activity restrictions can block this.
+
+Full-screen notification
+Can be denied by Android or device settings.
+
+
+ReminderAlertActivity.kt
+Full-screen Compose reminder interface
+
+The six specific issues
+1. Direct activity launch is unreliable
+In TaskAlarmReceiver.kt, you have:
+context.startActivity(fullScreenIntent)
+
+
+This is not a reliable way to open an activity from a background BroadcastReceiver.
+
+Android restricts background activity launches to prevent apps from unexpectedly taking over the screen.
+
+Fix: Remove the direct startActivity() attempt. Use a correctly configured full-screen notification PendingIntent as the system-managed entry point. 
+developer.android.com+1
+
+2. Full-screen access is not checked
+Your manifest declares:
+<uses-permission
+    android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+
+
+But your receiver never checks:
+notificationManager.canUseFullScreenIntent()
+
+
+This is especially important because your project targets Android 36.
+
+Android 14 and newer restrict automatic full-screen access to qualifying alarm and calling apps. A general productivity reminder app must not assume it will receive that access through Google Play. 
+source.android.com+1
+
+
+Fix: Build an onboarding permission screen, check the permission, provide the appropriate Settings link when available, and retain a notification fallback.
+3. Your test reminder can fail
+In TaskAlarmScheduler.kt, normal reminders check:
+alarmManager?.canScheduleExactAlarms()
+
+
+But scheduleTestAlarm() directly executes:
+alarmManager?.setExactAndAllowWhileIdle(...)
+
+
+There is no permission check or SecurityException fallback.
+
+This means the test button can fail on a fresh Android installation.
+
+Fix: Use the same permission-aware scheduling method for normal and test alarms.
+4. Your wake-lock implementation is outdated
+You use:
+PowerManager.FULL_WAKE_LOCK or
+PowerManager.ACQUIRE_CAUSES_WAKEUP or
+PowerManager.ON_AFTER_RELEASE
+
+
+These are deprecated mechanisms.
+
+Do not rely on this wake lock to force your Compose activity to appear. Let Android handle screen activation through the permitted full-screen notification mechanism.
+5. Notification channel settings can prevent the alert
+Your channel is created with IMPORTANCE_HIGH, which is correct.
+
+However, Android lets users change notification-channel settings. Once the channel exists, changing its importance in your source code does not override the user's existing setting.
+
+Check:
+- Channel importance.
+- Whether notifications are enabled.
+- Whether pop-up notifications are enabled.
+- Lock-screen notification visibility.
+- Sound and vibration settings.
+Also, you set sound both on the notification and on the channel. This should be centralized in the channel to avoid inconsistent or duplicate sound behaviour. 
+developer.android.com
+
+6. Your PendingIntent identifiers collide
+The full-screen activity uses:
+taskId.toInt().coerceAtLeast(100)
+
+
+For task IDs from 1 to 100, the same request code is used.
+
+Consequently, two different reminders can accidentally resolve to the same PendingIntent identity.
+
+Fix: Use a stable, unique request-code strategy for each task and action. Use the same identity when cancelling or updating that PendingIntent.
+
+2. The behaviour I recommend implementing
+There is one Android restriction you need to understand.
+
+Android 13+ intentionally favours a persistent heads-up notification when the user is actively using the phone, even when a full-screen intent is attached.
+
+The official Android behaviour is:
+Display state	Full-screen permission granted	Permission denied
+Screen locked	Full-screen activity	Heads-up notification
+Screen off	Full-screen activity	Heads-up notification / AOD
+Screen unlocked	Heads-up notification	Heads-up notification
+
+
+source.android.com+1
+For ChronoTask, I recommend:
+- App open: Show the full-screen Compose reminder inside the app.
+- App in background, screen unlocked: Show a persistent, prominent heads-up reminder with Complete and Snooze.
+- Screen locked or off: Request a system-managed full-screen alarm notification, where permitted.
+- Full-screen access unavailable: Show the best available notification and clearly indicate the limitation.
+This is more reliable than repeatedly trying to force an activity open.
+3. Exact code changes required
+These are the changes I would ask your developer or coding agent to implement.
+A. Correct the notification receiver
+The receiver should:
+1. Validate the task ID and reminder state.
+2. Create a unique full-screen PendingIntent.
+3. Check notification availability.
+4. Attach the full-screen PendingIntent.
+5. Post the notification.
+6. Avoid launching the activity directly.
+The central notification configuration should resemble:
+val notification = NotificationCompat.Builder(
+    context,
+    ChronoTaskApp.REMINDER_CHANNEL_ID
+)
+    .setSmallIcon(R.drawable.ic_reminder)
+    .setContentTitle(title)
+    .setContentText(details)
+    .setCategory(NotificationCompat.CATEGORY_ALARM)
+    .setPriority(NotificationCompat.PRIORITY_MAX)
+    .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+    .setOngoing(true)
+    .setAutoCancel(false)
+    .setFullScreenIntent(
+        fullScreenPendingIntent,
+        true
+    )
+    .setContentIntent(fullScreenPendingIntent)
+    .addAction(
+        R.drawable.ic_check,
+        "Complete",
+        completePendingIntent
+    )
+    .addAction(
+        R.drawable.ic_snooze,
+        "Snooze",
+        snoozePendingIntent
+    )
+    .build()
+
+notificationManager.notify(
+    notificationId,
+    notification
+)
+
+
+Use the system notification channel for sound and vibration, rather than configuring the same behaviour twice.
+
+This is a configuration pattern, not a complete replacement for your receiver. The permission checks and action lifecycle must also be implemented.
+B. Add full-screen permission onboarding
+Add a dedicated screen inside ChronoTask.
+
+Make your reminders impossible to miss
+
+Configure the Android permissions needed for reliable, time-sensitive reminders.
+
+
+Notifications
+Allow reminder notifications.
+Required
+
+Exact alarms
+Allow reminders at their scheduled time.
+Required when applicable
+
+Full-screen notifications
+Allow eligible alarms to open the full-screen alert.
+Conditional
+
+Lock-screen visibility
+Allow reminder content on the lock screen.
+Device setting
+
+The app should verify each permission rather than assuming that opening Settings means permission was granted.
+
+For Android 14+, check:
+if (Build.VERSION.SDK_INT >= 34) {
+    val manager =
+        getSystemService(NotificationManager::class.java)
+
+    val allowed = manager.canUseFullScreenIntent()
+}
+
+
+When permission is unavailable, offer:
+Intent(
+    Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT,
+    Uri.parse("package:$packageName")
+)
+
+
+Only open this Settings page from a user action. Do not repeatedly interrupt the user.
+C. Fix exact alarm scheduling
+Your normal scheduler should have a clear permission state.
+- If exact alarm access is granted, schedule an exact wake-up alarm.
+- If access is unavailable, explain that timing may be delayed.
+- Handle permission restoration and reschedule outstanding alarms.
+- Use the same scheduling logic for test reminders.
+For your use case, RTC_WAKEUP is appropriate because reminders use wall-clock time and should be delivered while the device is sleeping. 
+developer.android.com+1
+
+D. Fix reboot recovery
+Your existing BootReceiver is a good start, but it should be made more robust.
+
+It currently launches a detached coroutine without goAsync().
+
+Implement proper asynchronous receiver lifecycle handling, then restore:
+- All future active reminders.
+- Recurring reminder occurrences.
+- Snoozed reminders.
+- Notification states where applicable.
+Also handle:
+- BOOT_COMPLETED
+- MY_PACKAGE_REPLACED
+- Exact-alarm permission restored
+- Timezone changed
+- System clock changed
+Do not assume alarms survive a device reboot. 
+developer.android.com+1
+
+
+4. Samsung Galaxy settings to test
+Since you are using a Samsung phone, test these settings as well.
+Samsung troubleshooting checklist
+
+
+
+
+
+
+
+
+
+1. App notifications
+
+Settings → Apps → ChronoTask → Notifications → Allow notifications.
+
+Check pop-up and lock-screen notification settings.
+
+
+
+
+
+
+
+
+
+
+
+
+2. Alarms and reminders
+
+Settings → Apps → Special access → Alarms and reminders → ChronoTask.
+
+Enable access if required.
+
+
+
+
+
+
+
+
+
+
+
+
+3. Full-screen notification access
+
+Settings → Apps → Special access → Full-screen alerts or Full-screen notifications.
+
+The exact menu name depends on One UI.
+
+
+
+
+
+
+
+
+
+
+
+
+4. Battery restrictions
+
+Settings → Apps → ChronoTask → Battery → Unrestricted, if available.
+
+Also check whether Samsung has placed the app in Sleeping or Deep sleeping apps.
+
+
+
+One distinction: force-stopping an app is different from merely closing it from Recent Apps. Force-stop can prevent its alarms and receivers from working until the user opens the app again.
+
+5. The testing process I want you to follow
+After implementing the fixes, test with a 30-second reminder.
+Test	Procedure	Expected result
+1	Keep ChronoTask open	Full-screen in-app alert
+2	Open another app	Prominent reminder notification
+3	Lock the phone	Full-screen alert if permitted
+4	Turn display off	Full-screen alert if permitted
+5	Restart phone	Reminder restored
+6	Deny full-screen access	Notification fallback
+7	Deny exact alarm access	Permission explanation and fallback
+8	Complete reminder from notification	Task marked completed
+9	Snooze reminder	New reminder at correct time
+10	Create five simultaneous reminders	Correct task shown for each
+
+Do not test only while the app is open. That can conceal the background-delivery problems.
+
+6. One detail I need from you
+I want to tailor the final implementation to the actual Samsung Android version rather than give you generic instructions.
+Your Samsung device details
+Phone model
+Galaxy S21 FE
+
+Galaxy S22–S26
+
+Other Samsung Galaxy
+
+
+
+Android version
+Android 13
+
+Android 14
+
+Android 15
+
+Android 16
+
+Not sure
+
+
+
+When does the reminder fail?
+Screen off and locked — nothing appears
+
+Screen unlocked — nothing appears
+
+Both locked and unlocked
+
+Notification appears, but full screen does not
+
+Works only when ChronoTask is open
+
+
+
+How did you install ChronoTask?
+Android Studio / APK
+
+Google Play Store
+
+
+Submit device details
+My final recommendation: Treat ChronoTask's reminder engine as a separate critical subsystem. It should be tested independently of the Compose UI. A beautiful full-screen reminder is worthless if the alarm never reaches the notification system.
+
+I would fix the alarm scheduling, full-screen permission handling, receiver lifecycle and PendingIntent collisions before adding another visual feature.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+My device: Galaxy S21 FE. Android version: Android 16. Reminder failure: Notification appears, but full screen does not. Installation: Installed directly using Android Studio/APK. Give me the precise implementation and Samsung-specific fixes for ChronoTask.
+
+
+
+
+
+
+
+
+
+
+
+
+Worked for 1m
+Inspected Android reminder app files and reviewed scheduling implementation
+
+
+
+
+
+Searched 8 websites
+
+
+
+
+
+Refined alarms, improved reminders, verified full-screen access, and applied fixes
+
+
+
+
+
+Fetched ChronoTaskApp configuration and reminder scheduler source
+
+
+
+
+
+
+
+
+
+
+
+
+
+ChronoTask — Galaxy S21 FE / Android 16 fix
+I inspected the current source in your GitHub repository. The problem is not simply that your reminder activity lacks lock-screen flags. Your implementation already has those flags in the manifest and activity.
+
+There are three specific problems in the current implementation:
+1. You never check whether Android allows ChronoTask to use full-screen intents. Your manifest declares USE_FULL_SCREEN_INTENT, but that does not guarantee access on Android 14 and later.
+2. Your receiver calls context.startActivity(fullScreenIntent) from the background. This is unreliable under Android's background activity launch restrictions. The notification's full-screen PendingIntent should be the mechanism that launches the activity.
+3. Your activity calls requestDismissKeyguard(). ChronoTask should display over the lock screen, not try to dismiss or bypass the user's lock screen.
+Android's documented behaviour is important here:
+Phone state	Expected behaviour
+Screen locked	Full-screen reminder, if FSI access is granted
+Screen off	Full-screen reminder, if FSI access is granted
+Phone unlocked and being used	Persistent heads-up notification, not necessarily a full-screen activity
+FSI access denied	Heads-up notification instead of the full-screen activity
+
+So, if you test while the phone is unlocked and ChronoTask only shows a notification, that can be normal Android behaviour—not a bug. 
+source.android.com+1
+
+1. First: enable full-screen access on your Samsung
+Do this before changing code
+On your Galaxy S21 FE, try:
+1. Open Settings.
+2. Go to Apps.
+3. Tap the three-dot menu or Special access.
+4. Find Full screen alerts or Full-screen notifications.
+5. Find ChronoTask.
+6. Enable its access, if the setting is available.
+The exact menu label can vary with One UI version. Android exposes this as a special app access setting. 
+source.android.com+1
+
+
+Also check:
+- Settings → Apps → ChronoTask → Notifications: notifications enabled.
+- Open the ChronoTask reminder notification category and ensure it is set to Alert, not Silent.
+- Settings → Notifications → Lock screen notifications: notifications are allowed on the lock screen.
+- Settings → Battery → Background usage limits → Never auto sleeping apps: add ChronoTask.
+Samsung documents that sleeping and deep-sleeping app restrictions can affect alarms and background work. This is especially relevant if reminders are late or fail to fire; it is not the primary explanation if the notification already appears at the correct time. 
+Samsung Developer+1
+
+2. Fix the full-screen permission handling
+Your manifest already contains:
+<uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+
+
+Keep it. You also need to check access at runtime.
+
+Add this helper to your Android code, for example in a new file named FullScreenIntentAccess.kt:
+
+package com.example.reminder
+
+import android.app.NotificationManager
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.provider.Settings
+
+object FullScreenIntentAccess {
+
+    fun isAllowed(context: Context): Boolean {
+        if (Build.VERSION.SDK_INT < 34) return true
+
+        val manager =
+            context.getSystemService(NotificationManager::class.java)
+
+        return manager.canUseFullScreenIntent()
+    }
+
+    fun openSettings(context: Context) {
+        if (Build.VERSION.SDK_INT >= 34) {
+            val intent = Intent(
+                Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT
+            ).apply {
+                data = Uri.parse("package:${context.packageName}")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+
+            context.startActivity(intent)
+        }
+    }
+}
+
+
+
+How to use it: Add an explicit button in ChronoTask's reminder settings:
+Button(
+    onClick = {
+        FullScreenIntentAccess.openSettings(context)
+    }
+) {
+    Text("Enable Full-Screen Alerts")
+}
+
+
+Only show this button when:
+!FullScreenIntentAccess.isAllowed(context)
+
+
+Recheck the permission when the user returns from Settings. Do not assume that opening the settings page means the user granted access.
+
+Android provides canUseFullScreenIntent() and the settings action specifically for this purpose. 
+source.android.com+1
+
+
+Important: Because you installed through Android Studio/APK, the Play Store's automatic permission revocation is not the direct cause of your current installation's behaviour. However, the permission can still be denied or disabled. If you later distribute ChronoTask through Google Play, its core functionality must meet Google's alarm/calling eligibility requirements for automatic FSI access. A general productivity reminder app should not assume it will qualify. 
+developer.android.com+1
+
+3. Replace the alarm notification implementation
+Your current TaskAlarmReceiver.kt has a direct background activity launch and a deprecated wake-lock approach. Remove both.
+
+The following is the replacement for the ACTION_TASK_REMINDER branch. Keep your existing Complete and Snooze database operations, but make sure they run with goAsync() if they need asynchronous work.
+
+ACTION_TASK_REMINDER -> {
+    val fullScreenIntent = Intent(
+        context,
+        ReminderAlertActivity::class.java
+    ).apply {
+        putExtra(EXTRA_TASK_ID, taskId)
+        putExtra(EXTRA_TASK_TITLE, title)
+        putExtra(EXTRA_TASK_DETAILS, details)
+        putExtra(EXTRA_TASK_CATEGORY, category)
+        putExtra(EXTRA_TASK_PRIORITY, priority)
+
+        // Unique identity for this reminder
+        data = android.net.Uri.parse(
+            "chronotask://reminder/$taskId"
+        )
+
+        flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                Intent.FLAG_ACTIVITY_CLEAR_TOP
+    }
+
+    val fullScreenPendingIntent = PendingIntent.getActivity(
+        context,
+        0,
+        fullScreenIntent,
+        PendingIntent.FLAG_UPDATE_CURRENT or
+                PendingIntent.FLAG_IMMUTABLE
+    )
+
+    val completeIntent = Intent(
+        context,
+        TaskAlarmReceiver::class.java
+    ).apply {
+        action = ACTION_TASK_COMPLETE
+        putExtra(EXTRA_TASK_ID, taskId)
+        data = android.net.Uri.parse(
+            "chronotask://complete/$taskId"
+        )
+    }
+
+    val completePendingIntent = PendingIntent.getBroadcast(
+        context,
+        0,
+        completeIntent,
+        PendingIntent.FLAG_UPDATE_CURRENT or
+                PendingIntent.FLAG_IMMUTABLE
+    )
+
+    val snoozeIntent = Intent(
+        context,
+        TaskAlarmReceiver::class.java
+    ).apply {
+        action = ACTION_TASK_SNOOZE
+        putExtra(EXTRA_TASK_ID, taskId)
+        putExtra(EXTRA_TASK_TITLE, title)
+        putExtra(EXTRA_TASK_DETAILS, details)
+        putExtra(EXTRA_SNOOZE_MINUTES, 15)
+        data = android.net.Uri.parse(
+            "chronotask://snooze/$taskId"
+        )
+    }
+
+    val snoozePendingIntent = PendingIntent.getBroadcast(
+        context,
+        0,
+        snoozeIntent,
+        PendingIntent.FLAG_UPDATE_CURRENT or
+                PendingIntent.FLAG_IMMUTABLE
+    )
+
+    val notification = NotificationCompat.Builder(
+        context,
+        ChronoTaskApp.REMINDER_CHANNEL_ID
+    )
+        .setSmallIcon(android.R.drawable.ic_popup_reminder)
+        .setContentTitle(title)
+        .setContentText(
+            details.ifBlank { "Scheduled task reminder" }
+        )
+        .setCategory(NotificationCompat.CATEGORY_ALARM)
+        .setPriority(NotificationCompat.PRIORITY_MAX)
+        .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+        .setAutoCancel(false)
+        .setOngoing(true)
+        .setOnlyAlertOnce(false)
+        .setContentIntent(fullScreenPendingIntent)
+        .setFullScreenIntent(fullScreenPendingIntent, true)
+        .addAction(
+            android.R.drawable.checkbox_on_background,
+            "Complete",
+            completePendingIntent
+        )
+        .addAction(
+            android.R.drawable.ic_lock_idle_alarm,
+            "Snooze 15m",
+            snoozePendingIntent
+        )
+        .build()
+
+    val notificationId =
+        if (taskId > 0) taskId.hashCode() else 9999
+
+    notificationManager?.notify(notificationId, notification)
+
+    // Do not call context.startActivity() here.
+    // Android launches the activity through the notification's
+    // full-screen PendingIntent when its rules allow it.
+}
+
+
+
+This fixes several issues in your original receiver:
+- Removes the unreliable background startActivity() call.
+- Removes the deprecated FULL_WAKE_LOCK / ACQUIRE_CAUSES_WAKEUP approach.
+- Gives each reminder a unique PendingIntent identity using its URI.
+- Keeps Complete and Snooze actions associated with the correct reminder.
+- Leaves the system in control of whether to show a full-screen activity or heads-up notification.
+The full-screen intent must be attached to a high-importance notification. Your existing channel is already created with IMPORTANCE_HIGH, which is the correct starting point. 
+developer.android.com+1
+
+4. Fix ReminderAlertActivity.kt
+Your current activity already calls setShowWhenLocked(true) and setTurnScreenOn(true), which is correct. The problem is this line:
+keyguardManager?.requestDismissKeyguard(this, null)
+
+
+Remove it. ChronoTask should show its reminder over the lock screen without attempting to dismiss the lock screen.
+
+Replace your configureLockScreenFlags() method with:
+
+private fun configureLockScreenFlags() {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+        setShowWhenLocked(true)
+        setTurnScreenOn(true)
+    } else {
+        @Suppress("DEPRECATION")
+        window.addFlags(
+            WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+            WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+        )
+    }
+
+    // Keep the display awake while the reminder activity is visible.
+    window.addFlags(
+        WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+    )
+}
+
+
+
+Also remove the unused KeyguardManager import.
+
+Your manifest currently has this activity declaration:
+<activity
+    android:name=".ui.reminder.ReminderAlertActivity"
+    android:exported="false"
+    android:launchMode="singleTask"
+    android:excludeFromRecents="true"
+    android:showWhenLocked="true"
+    android:turnScreenOn="true"
+    android:showOnLockScreen="true"
+    android:theme="@style/Theme.MyApplication" />
+
+
+Use this instead:
+
+<activity
+    android:name=".ui.reminder.ReminderAlertActivity"
+    android:exported="false"
+    android:excludeFromRecents="true"
+    android:showWhenLocked="true"
+    android:turnScreenOn="true"
+    android:theme="@style/Theme.MyApplication" />
+
+
+
+The showWhenLocked and turnScreenOn attributes are the relevant Android activity settings. You do not need to dismiss the keyguard.
+5. Fix the notification channel
+Your ChronoTaskApp.kt already creates a high-importance channel:
+NotificationManager.IMPORTANCE_HIGH
+
+
+That is good. However, it currently configures a notification sound while ReminderAlertActivity also starts its own alarm ringtone. That can result in overlapping sounds.
+
+For a reliable first implementation, let the notification channel handle the alert sound and remove this call from ReminderAlertActivity.onCreate():
+startAudioVibe()
+
+
+Keep stopAudioVibe() only if you retain the corresponding audio implementation; otherwise remove the unused ringtone and vibration methods and fields too.
+
+I recommend using an alarm sound on the channel:
+val soundUri =
+    RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+
+val audioAttributes = AudioAttributes.Builder()
+    .setUsage(AudioAttributes.USAGE_ALARM)
+    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+    .build()
+
+
+Keep the channel's high importance, vibration and public lock-screen visibility. Remove setBypassDnd(true) unless you have a genuine need for Do Not Disturb access; it is not required for full-screen alerts.
+
+Important: Android notification channel settings are persistent. Once a channel is created, changing its importance or sound in source code does not override the user's existing channel settings. For development, use a new channel ID, such as:
+const val REMINDER_CHANNEL_ID = "chronotask_alarm_v2"
+
+
+Then create the new channel. This gives you a clean channel configuration without needing to clear the app's data. The user can still change the new channel's settings afterward.
+6. Make the notification ID consistent
+In the receiver code above, use the same notification ID calculation everywhere.
+
+For your current implementation, the simplest option is to retain:
+val notificationId =
+    if (taskId > 0) taskId.toInt() else 9999
+
+
+Use that same calculation in:
+- TaskAlarmReceiver when posting the notification.
+- TaskAlarmReceiver when Complete or Snooze cancels it.
+- ReminderAlertActivity.dismissNotification().
+Otherwise, you can end up with a reminder screen closing while its notification remains visible.
+
+Your current receiver also uses coerceAtLeast() for PendingIntent request codes. That can cause different tasks to share a PendingIntent identity. The unique data URIs in the replacement code address that issue.
+7. Check exact alarm permission separately
+Your TaskAlarmScheduler.scheduleReminder() already checks canScheduleExactAlarms() for normal reminders. However, scheduleTestAlarm() directly calls setExactAndAllowWhileIdle() without checking.
+
+Use this pattern in the test alarm method:
+
+if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+    if (alarmManager?.canScheduleExactAlarms() == true) {
+        alarmManager.setExactAndAllowWhileIdle(
+            AlarmManager.RTC_WAKEUP,
+            triggerAt,
+            pendingIntent
+        )
+    } else {
+        alarmManager?.setAndAllowWhileIdle(
+            AlarmManager.RTC_WAKEUP,
+            triggerAt,
+            pendingIntent
+        )
+    }
+} else {
+    alarmManager?.setExactAndAllowWhileIdle(
+        AlarmManager.RTC_WAKEUP,
+        triggerAt,
+        pendingIntent
+    )
+}
+
+
+
+If exact alarm access is not granted, ChronoTask should explain that reminders may be delayed and provide a button to open the Alarms & reminders special access setting. This is separate from full-screen intent access: one controls alarm scheduling precision, the other controls whether the notification can launch the full-screen activity. 
+source.android.com+1
+
+8. Samsung S21 FE testing procedure
+After applying the changes, test in this order.
+Test A — Locked screen
+1. Open ChronoTask.
+2. Confirm full-screen intent access is enabled.
+3. Schedule a test reminder for 30 seconds later.
+4. Press the power button to lock your phone.
+5. Wait for the reminder.
+Expected
+The screen should turn on and display ReminderAlertActivity over the lock screen.
+
+Test B — Screen off
+1. Schedule another reminder.
+2. Turn the display off.
+3. Leave the phone undisturbed until the alarm fires.
+Expected
+The reminder activity should appear if full-screen access is granted.
+
+Test C — Phone unlocked
+1. Keep ChronoTask in the background.
+2. Leave the phone unlocked.
+3. Trigger a reminder.
+Expected
+An expanded heads-up notification with Complete and Snooze actions. Android does not promise to open the full-screen activity while the user is actively using the phone.
+
+Test D — Permission denied
+1. Disable ChronoTask's full-screen access.
+2. Trigger a reminder while the phone is locked.
+Expected
+A heads-up notification instead of the full-screen activity.
+
+Do not use Android's Force stop button as an ordinary reminder test. A force-stopped app is subject to Android's stopped-package restrictions until it is opened again.
+9. One more reliability fix: receiver execution
+Your current BootReceiver and the Complete/Snooze branches of TaskAlarmReceiver start coroutines without calling goAsync().
+
+That creates a risk that Android terminates the receiver process before the database operation finishes.
+
+For asynchronous receiver work, use this pattern:
+val pendingResult = goAsync()
+
+CoroutineScope(Dispatchers.IO).launch {
+    try {
+        // Perform database or repository operation here.
+    } catch (e: Exception) {
+        Log.e("TaskAlarmReceiver", "Receiver operation failed", e)
+    } finally {
+        pendingResult.finish()
+    }
+}
+
+
+Use it for the database operations, not for the immediate notification posting. Keep the alarm notification branch fast.
+
+Also, a phone that is completely powered off cannot run ChronoTask's alarm receiver or display an alert. Reboot rescheduling can restore future alarms after the phone starts again, but cannot make an alarm fire while the device is off.
+
+10. What I would consider the final ChronoTask reminder architecture
+User creates reminder
+        |
+        v
+TaskAlarmScheduler
+        |
+        v
+AlarmManager (RTC_WAKEUP)
+        |
+        v
+TaskAlarmReceiver
+        |
+        v
+High-importance notification
+        |
+        +---------------------------+
+        |                           |
+        v                           v
+FSI access granted             FSI unavailable
+        |                           |
+        v                           v
+Locked / screen off            Heads-up notification
+        |                       with Complete/Snooze
+        v
+ReminderAlertActivity
+        |
+        +----------+----------+
+        |          |          |
+        v          v          v
+     Dismiss    Complete    Snooze
+
+
+This is the behaviour I recommend:
+- Locked or screen off: show the full-screen reminder when Android grants access.
+- Unlocked: show an actionable heads-up notification.
+- Permission unavailable: show a useful notification rather than silently failing.
+- After reboot: reschedule future reminders.
+- After permission changes: recheck access and reschedule alarms where necessary.
+Implementation priority
+Priority	Change	Importance
+1	Check and request FSI special access	Critical
+2	Remove background startActivity()	Critical
+3	Remove requestDismissKeyguard()	High
+4	Fix PendingIntent identities	High
+5	Correct notification channel configuration	High
+6	Fix goAsync() receiver handling	High
+7	Fix exact-alarm test scheduling	Medium
+8	Test Samsung battery restrictions	Medium
+
+My recommendation: implement items 1–5 first, build a fresh APK, and test with the phone locked. Your existing code already has much of the required structure; the main missing piece is correctly integrating Android's full-screen access rules.
+
+Useful official references:
+- Android full-screen intent limits and lock-state behaviour
+- Android Developers — Full-screen notification implementation
+- Google Play full-screen intent requirements
+- Samsung application background management
+One important distinction: I have inspected your repository and provided the changes to make, but I have not committed or tested a modified APK. The next useful step would be to apply these changes to a separate GitHub branch, then build and test the APK on your S21 FE rather than changing main without verification.

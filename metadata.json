@@ -1,0 +1,6 @@
+{
+  "name": "ChronoTask",
+  "description": "Offline daily to-do and smart reminder app with Samsung-style full-screen alerts, Stitch UI, priority categorization, and weekly progress charts.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -80,13 +80,21 @@ class TaskViewModel : ViewModel() {
         _searchQuery
     ) { allTasks, filter, category, query ->
         val now = System.currentTimeMillis()
-        val calendar = Calendar.getInstance()
-        calendar.set(Calendar.HOUR_OF_DAY, 0)
-        calendar.set(Calendar.MINUTE, 0)
-        calendar.set(Calendar.SECOND, 0)
-        calendar.set(Calendar.MILLISECOND, 0)
+        val calendar = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
         val startOfToday = calendar.timeInMillis
-        val endOfToday = startOfToday + (24 * 60 * 60 * 1000L) - 1
+        val endOfTodayCal = Calendar.getInstance().apply {
+            timeInMillis = startOfToday
+            set(Calendar.HOUR_OF_DAY, 23)
+            set(Calendar.MINUTE, 59)
+            set(Calendar.SECOND, 59)
+            set(Calendar.MILLISECOND, 999)
+        }
+        val endOfToday = endOfTodayCal.timeInMillis
 
         val todayTasks = allTasks.filter {
             (it.reminderTimeMillis in startOfToday..endOfToday) ||
@@ -155,7 +163,8 @@ class TaskViewModel : ViewModel() {
         category: TaskCategory,
         priority: PriorityLevel,
         reminderTimeMillis: Long,
-        subtasks: List<Subtask>
+        isRecurringDaily: Boolean = false,
+        subtasks: List<Subtask> = emptyList()
     ) {
         viewModelScope.launch {
             val task = TaskEntity(
@@ -164,6 +173,7 @@ class TaskViewModel : ViewModel() {
                 category = category.name,
                 priority = priority.name,
                 reminderTimeMillis = reminderTimeMillis,
+                isRecurringDaily = isRecurringDaily,
                 subtasksJson = TaskEntity.encodeSubtasks(subtasks)
             )
             val id = repository.insertTask(task)
@@ -178,6 +188,45 @@ class TaskViewModel : ViewModel() {
         }
     }
 
+    fun updateExistingTask(
+        taskId: Long,
+        title: String,
+        details: String,
+        category: TaskCategory,
+        priority: PriorityLevel,
+        reminderTimeMillis: Long,
+        isRecurringDaily: Boolean = false,
+        subtasks: List<Subtask> = emptyList()
+    ) {
+        viewModelScope.launch {
+            val existing = repository.getTaskById(taskId)
+            val updated = (existing ?: TaskEntity(
+                id = taskId,
+                title = title,
+                reminderTimeMillis = reminderTimeMillis
+            )).copy(
+                title = title,
+                details = details,
+                category = category.name,
+                priority = priority.name,
+                reminderTimeMillis = reminderTimeMillis,
+                isRecurringDaily = isRecurringDaily,
+                subtasksJson = TaskEntity.encodeSubtasks(subtasks)
+            )
+            repository.updateTask(updated)
+            // Safely cancel previous alarm and reschedule
+            alarmScheduler.cancelReminder(taskId)
+            if (!updated.isCompleted && updated.reminderTimeMillis > System.currentTimeMillis()) {
+                alarmScheduler.scheduleReminder(updated)
+            }
+            _inAppBanner.value = InAppBannerData(
+                id = taskId,
+                title = "Reminder Updated ✨",
+                message = "Changes saved for '${title}'"
+            )
+        }
+    }
+
     fun addFromTemplate(template: StarterTemplate) {
         val reminderTime = System.currentTimeMillis() + (template.minutesFromNow * 60 * 1000L)
         addNewTask(
@@ -186,20 +235,27 @@ class TaskViewModel : ViewModel() {
             category = template.category,
             priority = template.priority,
             reminderTimeMillis = reminderTime,
+            isRecurringDaily = false,
             subtasks = emptyList()
         )
     }
 
     fun toggleTaskComplete(taskId: Long, currentlyCompleted: Boolean) {
         viewModelScope.launch {
-            repository.toggleTaskComplete(taskId, currentlyCompleted)
             if (!currentlyCompleted) {
-                alarmScheduler.cancelReminder(taskId)
+                // Complete using unified manager (handles alarms and daily recurrence)
+                com.example.reminder.TaskReminderManager.completeTask(ChronoTaskApp.instance, taskId)
                 _inAppBanner.value = InAppBannerData(
                     id = taskId,
                     title = "Task Completed! ✨",
                     message = "Great work keeping your momentum!"
                 )
+            } else {
+                repository.toggleTaskComplete(taskId, currentlyCompleted = true)
+                val task = repository.getTaskById(taskId)
+                if (task != null && task.reminderTimeMillis > System.currentTimeMillis()) {
+                    alarmScheduler.scheduleReminder(task)
+                }
             }
         }
     }

@@ -85,8 +85,8 @@ import com.example.ui.dashboard.DashboardScreen
 import com.example.ui.reminder.ReminderAlertActivity
 import com.example.ui.reminders.RemindersTimelineScreen
 import com.example.ui.theme.ChronoTaskTheme
-import com.example.ui.theme.IosColorScheduled
-import com.example.ui.theme.PriorityHigh
+import com.example.ui.theme.AuraIrisPrimary
+import com.example.ui.theme.AuraRoseUrgent
 import com.example.ui.theme.ThemeController
 import com.example.ui.viewmodel.TaskViewModel
 import kotlinx.coroutines.delay
@@ -156,7 +156,12 @@ fun MainAppContainer(viewModel: TaskViewModel) {
             bottomBar = {
                 SlidingIndicatorNavigationBar(
                     selectedTab = selectedTab,
-                    onSelectTab = { selectedTab = it }
+                    onSelectTab = {
+                        if (selectedTab != it) {
+                            com.example.ui.util.HapticHelper.tick(context)
+                        }
+                        selectedTab = it
+                    }
                 )
             }
         ) { innerPadding ->
@@ -246,7 +251,7 @@ fun MainAppContainer(viewModel: TaskViewModel) {
                             .padding(16.dp)
                             .clip(RoundedCornerShape(18.dp))
                             .background(MaterialTheme.colorScheme.surface)
-                            .border(1.dp, PriorityHigh, RoundedCornerShape(18.dp))
+                            .border(1.dp, AuraRoseUrgent, RoundedCornerShape(18.dp))
                             .bounceClick { permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) }
                             .padding(14.dp)
                     ) {
@@ -254,7 +259,7 @@ fun MainAppContainer(viewModel: TaskViewModel) {
                             Icon(
                                 imageVector = Icons.Default.NotificationsActive,
                                 contentDescription = null,
-                                tint = PriorityHigh,
+                                tint = AuraRoseUrgent,
                                 modifier = Modifier.size(22.dp)
                             )
                             Spacer(modifier = Modifier.width(10.dp))
@@ -305,14 +310,14 @@ fun AnimatedSplashScreen(onSplashFinished: () -> Unit) {
                 modifier = Modifier
                     .size(100.dp)
                     .clip(CircleShape)
-                    .background(IosColorScheduled.copy(alpha = 0.2f))
-                    .border(2.dp, IosColorScheduled, CircleShape),
+                    .background(AuraIrisPrimary.copy(alpha = 0.2f))
+                    .border(2.dp, AuraIrisPrimary, CircleShape),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = Icons.Default.Alarm,
-                    contentDescription = "ChronoTask Logo",
-                    tint = IosColorScheduled,
+                    contentDescription = "AuraTask Logo",
+                    tint = AuraIrisPrimary,
                     modifier = Modifier.size(50.dp)
                 )
             }
@@ -320,7 +325,7 @@ fun AnimatedSplashScreen(onSplashFinished: () -> Unit) {
             Spacer(modifier = Modifier.height(18.dp))
 
             Text(
-                text = "Reminder",
+                text = "AuraTask",
                 fontSize = 32.sp,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onBackground,
@@ -389,7 +394,7 @@ fun SlidingIndicatorNavigationBar(
                     .height(54.dp)
                     .offset(x = tabWidth * animatedOffsetFraction)
                     .clip(RoundedCornerShape(27.dp))
-                    .background(IosColorScheduled)
+                    .background(AuraIrisPrimary)
             )
 
             // Interactive Tab Icons & Labels

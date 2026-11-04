@@ -7,7 +7,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -29,6 +28,7 @@ import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -37,6 +37,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
@@ -44,6 +48,7 @@ import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -53,6 +58,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -60,13 +66,15 @@ import androidx.compose.ui.unit.sp
 import com.example.data.PriorityLevel
 import com.example.data.Subtask
 import com.example.data.TaskCategory
+import com.example.data.TaskEntity
 import com.example.ui.components.AnimatedNumberTicker
 import com.example.ui.components.AnimatedTimeText
 import com.example.ui.components.bounceClick
-import com.example.ui.theme.IosColorImportant
-import com.example.ui.theme.IosColorPlace
-import com.example.ui.theme.IosColorScheduled
-import com.example.ui.theme.IosColorToday
+import com.example.ui.theme.AuraAmberImportant
+import com.example.ui.theme.AuraCyanAccent
+import com.example.ui.theme.AuraIrisLight
+import com.example.ui.theme.AuraIrisPrimary
+import com.example.ui.util.HapticHelper
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -82,26 +90,45 @@ fun TaskEditorBottomSheet(
         category: TaskCategory,
         priority: PriorityLevel,
         reminderTimeMillis: Long,
+        isRecurringDaily: Boolean,
         subtasks: List<Subtask>
     ) -> Unit,
+    existingTask: TaskEntity? = null,
     initialTitle: String = "",
     initialDetails: String = "",
     initialCategory: TaskCategory = TaskCategory.PERSONAL,
     initialPriority: PriorityLevel = PriorityLevel.MEDIUM,
-    initialReminderTimeMillis: Long = System.currentTimeMillis() + (30 * 60 * 1000L)
+    initialReminderTimeMillis: Long = System.currentTimeMillis() + (30 * 60 * 1000L),
+    initialIsRecurringDaily: Boolean = false
 ) {
+    val context = LocalContext.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    var title by remember { mutableStateOf(initialTitle) }
-    var details by remember { mutableStateOf(initialDetails) }
-    var isImportant by remember { mutableStateOf(initialPriority == PriorityLevel.HIGH) }
-    var selectedCategory by remember { mutableStateOf(initialCategory) }
-    var reminderTime by remember { mutableLongStateOf(initialReminderTimeMillis) }
+    var title by remember { mutableStateOf(existingTask?.title ?: initialTitle) }
+    var details by remember { mutableStateOf(existingTask?.details ?: initialDetails) }
+    var isImportant by remember {
+        mutableStateOf(
+            existingTask?.let { it.priority == PriorityLevel.HIGH.name } ?: (initialPriority == PriorityLevel.HIGH)
+        )
+    }
+    var selectedCategory by remember {
+        mutableStateOf(
+            existingTask?.let {
+                try { TaskCategory.valueOf(it.category) } catch (_: Exception) { initialCategory }
+            } ?: initialCategory
+        )
+    }
+    var reminderTime by remember {
+        mutableLongStateOf(existingTask?.reminderTimeMillis ?: initialReminderTimeMillis)
+    }
+    var isDailyRecurring by remember {
+        mutableStateOf(existingTask?.isRecurringDaily ?: initialIsRecurringDaily)
+    }
 
     var showCustomTimePicker by remember { mutableStateOf(false) }
     var showCategoryPicker by remember { mutableStateOf(false) }
 
-    // Custom Time Picker States
+    // Custom Exact Time Picker States
     val initialCal = remember(reminderTime) {
         Calendar.getInstance().apply { timeInMillis = reminderTime }
     }
@@ -111,7 +138,7 @@ fun TaskEditorBottomSheet(
     }
     var selectedMinute by remember { mutableIntStateOf(initialCal.get(Calendar.MINUTE)) }
     var isPm by remember { mutableStateOf(initialCal.get(Calendar.AM_PM) == Calendar.PM) }
-    var dayOffsetDays by remember { mutableIntStateOf(0) } // 0 = Today, 1 = Tomorrow, 2 = Day After
+    var dayOffsetDays by remember { mutableIntStateOf(0) }
 
     fun recalculateReminderTime(): Long {
         val cal = Calendar.getInstance().apply {
@@ -153,15 +180,15 @@ fun TaskEditorBottomSheet(
                 .navigationBarsPadding()
                 .verticalScroll(rememberScrollState())
         ) {
-            // Header: "New reminder" with Star Toggle
+            // Header: "New Reminder" with Star Priority Toggle
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
-                    text = "New reminder",
-                    fontSize = 20.sp,
+                    text = "New Reminder",
+                    fontSize = 22.sp,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface
                 )
@@ -173,7 +200,7 @@ fun TaskEditorBottomSheet(
                     Icon(
                         imageVector = if (isImportant) Icons.Default.Star else Icons.Outlined.StarBorder,
                         contentDescription = "Mark Important",
-                        tint = if (isImportant) IosColorImportant else MaterialTheme.colorScheme.onSurfaceVariant,
+                        tint = if (isImportant) AuraAmberImportant else MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(26.dp)
                     )
                 }
@@ -181,15 +208,15 @@ fun TaskEditorBottomSheet(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Title Input
+            // Title Input Field
             TextField(
                 value = title,
                 onValueChange = { title = it },
                 placeholder = {
                     Text(
-                        "Title",
-                        fontSize = 17.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        "What do you want to accomplish?",
+                        fontSize = 16.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                     )
                 },
                 singleLine = true,
@@ -217,9 +244,9 @@ fun TaskEditorBottomSheet(
                 onValueChange = { details = it },
                 placeholder = {
                     Text(
-                        "Notes (optional)",
-                        fontSize = 15.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                        "Add details or notes (optional)",
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                     )
                 },
                 maxLines = 2,
@@ -241,7 +268,7 @@ fun TaskEditorBottomSheet(
                 thickness = 0.8.dp
             )
 
-            // Time Row with Animated Sliding Time Text
+            // Time Row (Tap to open custom exact time selector)
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
@@ -252,28 +279,27 @@ fun TaskEditorBottomSheet(
                 Icon(
                     imageVector = Icons.Default.CalendarToday,
                     contentDescription = null,
-                    tint = IosColorToday,
+                    tint = AuraIrisPrimary,
                     modifier = Modifier.size(20.dp)
                 )
                 Spacer(modifier = Modifier.width(16.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Time (Tap to customize)",
-                        fontSize = 16.sp,
+                        text = "Time (Tap to set exact minute)",
+                        fontSize = 15.sp,
                         fontWeight = FontWeight.Medium,
                         color = MaterialTheme.colorScheme.onSurface
                     )
-                    // Sliding Animated Characters for Scheduled Time
                     AnimatedTimeText(
                         timeString = timeFormatter.format(Date(reminderTime)),
                         fontSize = 13.sp,
-                        color = IosColorScheduled,
+                        color = AuraIrisPrimary,
                         fontWeight = FontWeight.SemiBold
                     )
                 }
             }
 
-            // Custom Time & Date Picker Section with Animated Tickers
+            // Custom Exact Minute & Hour Picker
             AnimatedVisibility(
                 visible = showCustomTimePicker,
                 enter = fadeIn() + expandVertically(),
@@ -282,38 +308,38 @@ fun TaskEditorBottomSheet(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(18.dp))
+                        .clip(RoundedCornerShape(20.dp))
                         .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                         .border(
                             0.8.dp,
                             MaterialTheme.colorScheme.outline.copy(alpha = 0.4f),
-                            RoundedCornerShape(18.dp)
+                            RoundedCornerShape(20.dp)
                         )
                         .padding(16.dp)
                 ) {
                     Text(
-                        text = "Set Custom Time",
+                        text = "Exact Time Selection",
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface
                     )
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
 
-                    // Day Selector: Today, Tomorrow, In 2 Days
+                    // Day options: Today, Tomorrow, +2 Days, +3 Days
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        val dayOptions = listOf("Today" to 0, "Tomorrow" to 1, "In 2 Days" to 2)
+                        val dayOptions = listOf("Today" to 0, "Tomorrow" to 1, "+2 Days" to 2, "+3 Days" to 3)
                         dayOptions.forEach { (label, offset) ->
                             val isSel = dayOffsetDays == offset
                             Box(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(38.dp)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(if (isSel) IosColorScheduled else MaterialTheme.colorScheme.surface)
+                                    .height(36.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(if (isSel) AuraIrisPrimary else MaterialTheme.colorScheme.surface)
                                     .bounceClick {
                                         dayOffsetDays = offset
                                         reminderTime = recalculateReminderTime()
@@ -330,15 +356,15 @@ fun TaskEditorBottomSheet(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(18.dp))
 
-                    // Interactive Time Stepper (Hour, Minute, AM/PM) with sliding number tickers
+                    // Steppers for Hour & Minute with +/- 1 unit precision!
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceAround
                     ) {
-                        // Hour Controller
+                        // Hour Stepper
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text("Hour", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Spacer(modifier = Modifier.height(4.dp))
@@ -354,19 +380,19 @@ fun TaskEditorBottomSheet(
                                         },
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Icon(Icons.Default.Remove, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Icon(Icons.Default.Remove, contentDescription = "Hour -1", modifier = Modifier.size(16.dp))
                                 }
 
-                                Spacer(modifier = Modifier.width(8.dp))
+                                Spacer(modifier = Modifier.width(10.dp))
 
                                 AnimatedNumberTicker(
                                     number = selectedHour,
-                                    fontSize = 20.sp,
+                                    fontSize = 22.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
 
-                                Spacer(modifier = Modifier.width(8.dp))
+                                Spacer(modifier = Modifier.width(10.dp))
 
                                 Box(
                                     modifier = Modifier
@@ -379,16 +405,16 @@ fun TaskEditorBottomSheet(
                                         },
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Icon(Icons.Default.Add, contentDescription = "Hour +1", modifier = Modifier.size(16.dp))
                                 }
                             }
                         }
 
-                        Text(":", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                        Text(":", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
 
-                        // Minute Controller
+                        // Exact Minute Stepper (step by 1 minute: 36, 57, 59, etc.)
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("Minute", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("Exact Minute", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Spacer(modifier = Modifier.height(4.dp))
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Box(
@@ -397,24 +423,25 @@ fun TaskEditorBottomSheet(
                                         .clip(CircleShape)
                                         .background(MaterialTheme.colorScheme.surface)
                                         .bounceClick {
-                                            selectedMinute = if (selectedMinute <= 4) 55 else (selectedMinute - 5)
+                                            selectedMinute = if (selectedMinute <= 0) 59 else selectedMinute - 1
                                             reminderTime = recalculateReminderTime()
                                         },
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Icon(Icons.Default.Remove, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Icon(Icons.Default.Remove, contentDescription = "Minute -1", modifier = Modifier.size(16.dp))
                                 }
 
-                                Spacer(modifier = Modifier.width(8.dp))
+                                Spacer(modifier = Modifier.width(10.dp))
 
-                                AnimatedNumberTicker(
-                                    number = selectedMinute,
-                                    fontSize = 20.sp,
+                                val minuteFormatted = if (selectedMinute < 10) "0$selectedMinute" else "$selectedMinute"
+                                AnimatedTimeText(
+                                    timeString = minuteFormatted,
+                                    fontSize = 22.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
 
-                                Spacer(modifier = Modifier.width(8.dp))
+                                Spacer(modifier = Modifier.width(10.dp))
 
                                 Box(
                                     modifier = Modifier
@@ -422,12 +449,12 @@ fun TaskEditorBottomSheet(
                                         .clip(CircleShape)
                                         .background(MaterialTheme.colorScheme.surface)
                                         .bounceClick {
-                                            selectedMinute = if (selectedMinute >= 55) 0 else (selectedMinute + 5)
+                                            selectedMinute = if (selectedMinute >= 59) 0 else selectedMinute + 1
                                             reminderTime = recalculateReminderTime()
                                         },
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Icon(Icons.Default.Add, contentDescription = "Minute +1", modifier = Modifier.size(16.dp))
                                 }
                             }
                         }
@@ -437,7 +464,7 @@ fun TaskEditorBottomSheet(
                             modifier = Modifier
                                 .height(40.dp)
                                 .clip(RoundedCornerShape(12.dp))
-                                .background(IosColorScheduled)
+                                .background(AuraIrisPrimary)
                                 .bounceClick {
                                     isPm = !isPm
                                     reminderTime = recalculateReminderTime()
@@ -456,29 +483,51 @@ fun TaskEditorBottomSheet(
 
                     Spacer(modifier = Modifier.height(14.dp))
 
-                    // Quick presets row
+                    // Minute Fine-Tuning Slider (0 to 59 with instant drag)
+                    Text(
+                        text = "Slide to select any minute (0 to 59): $selectedMinute",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Slider(
+                        value = selectedMinute.toFloat(),
+                        onValueChange = {
+                            selectedMinute = it.toInt()
+                            reminderTime = recalculateReminderTime()
+                        },
+                        valueRange = 0f..59f,
+                        colors = SliderDefaults.colors(
+                            thumbColor = AuraIrisPrimary,
+                            activeTrackColor = AuraIrisPrimary,
+                            inactiveTrackColor = MaterialTheme.colorScheme.surface
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Quick Shortcuts: +1m, +5m, +15m, +1h
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        val now = System.currentTimeMillis()
-                        val presets = listOf(
-                            "+15m" to (now + 15 * 60 * 1000L),
-                            "+1 hr" to (now + 60 * 60 * 1000L),
-                            "Tonight 8 PM" to Calendar.getInstance().apply {
-                                set(Calendar.HOUR_OF_DAY, 20)
-                                set(Calendar.MINUTE, 0)
-                            }.timeInMillis
+                        val quickAddList = listOf(
+                            "+1m" to 1,
+                            "+5m" to 5,
+                            "+15m" to 15,
+                            "+30m" to 30,
+                            "+1h" to 60
                         )
-                        presets.forEach { (lbl, time) ->
+                        quickAddList.forEach { (lbl, mins) ->
                             Box(
                                 modifier = Modifier
                                     .weight(1f)
                                     .clip(RoundedCornerShape(10.dp))
                                     .background(MaterialTheme.colorScheme.surface)
                                     .bounceClick {
-                                        reminderTime = time
-                                        val c = Calendar.getInstance().apply { timeInMillis = time }
+                                        val target = System.currentTimeMillis() + (mins * 60 * 1000L)
+                                        reminderTime = target
+                                        val c = Calendar.getInstance().apply { timeInMillis = target }
                                         val h = c.get(Calendar.HOUR)
                                         selectedHour = if (h == 0) 12 else h
                                         selectedMinute = c.get(Calendar.MINUTE)
@@ -499,7 +548,7 @@ fun TaskEditorBottomSheet(
                 thickness = 0.8.dp
             )
 
-            // Category row
+            // Category Row
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
@@ -510,14 +559,14 @@ fun TaskEditorBottomSheet(
                 Icon(
                     imageVector = Icons.Default.LocationOn,
                     contentDescription = null,
-                    tint = IosColorPlace,
+                    tint = AuraCyanAccent,
                     modifier = Modifier.size(20.dp)
                 )
                 Spacer(modifier = Modifier.width(16.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = "Category",
-                        fontSize = 16.sp,
+                        fontSize = 15.sp,
                         fontWeight = FontWeight.Medium,
                         color = MaterialTheme.colorScheme.onSurface
                     )
@@ -540,7 +589,7 @@ fun TaskEditorBottomSheet(
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(12.dp))
-                                .background(if (selectedCategory == cat) IosColorScheduled else MaterialTheme.colorScheme.surfaceVariant)
+                                .background(if (selectedCategory == cat) AuraIrisPrimary else MaterialTheme.colorScheme.surfaceVariant)
                                 .bounceClick {
                                     selectedCategory = cat
                                     showCategoryPicker = false
@@ -562,7 +611,59 @@ fun TaskEditorBottomSheet(
                 thickness = 0.8.dp
             )
 
-            // My reminders row
+            // Daily Recurrence Toggle Row
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .bounceClick {
+                        isDailyRecurring = !isDailyRecurring
+                        HapticHelper.click(context)
+                    }
+                    .padding(vertical = 14.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                    Icon(
+                        imageVector = Icons.Default.Repeat,
+                        contentDescription = null,
+                        tint = if (isDailyRecurring) AuraIrisPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Column {
+                        Text(
+                            text = "Daily Recurring Reminder",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = if (isDailyRecurring) "Repeats every day at this time" else "Single reminder alert",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                Switch(
+                    checked = isDailyRecurring,
+                    onCheckedChange = {
+                        isDailyRecurring = it
+                        HapticHelper.click(context)
+                    },
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = Color.White,
+                        checkedTrackColor = AuraIrisPrimary
+                    )
+                )
+            }
+
+            HorizontalDivider(
+                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
+                thickness = 0.8.dp
+            )
+
+            // Unlimited Storage Alert feature badge
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
@@ -572,20 +673,20 @@ fun TaskEditorBottomSheet(
                 Icon(
                     imageVector = Icons.Default.Notifications,
                     contentDescription = null,
-                    tint = IosColorScheduled,
+                    tint = AuraIrisLight,
                     modifier = Modifier.size(20.dp)
                 )
                 Spacer(modifier = Modifier.width(16.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "My reminders",
-                        fontSize = 16.sp,
+                        text = "Full-Screen Wake Alert",
+                        fontSize = 15.sp,
                         fontWeight = FontWeight.Medium,
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        text = "Full-Screen alert & alarm enabled",
-                        fontSize = 13.sp,
+                        text = "Alarm sounds even on lockscreen (No reminder limit)",
+                        fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
@@ -612,7 +713,7 @@ fun TaskEditorBottomSheet(
                 ) {
                     Text(
                         text = "Cancel",
-                        fontSize = 17.sp,
+                        fontSize = 16.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
@@ -620,12 +721,14 @@ fun TaskEditorBottomSheet(
                 TextButton(
                     onClick = {
                         if (title.isNotBlank()) {
+                            HapticHelper.click(context)
                             onSaveTask(
                                 title.trim(),
                                 details.trim(),
                                 selectedCategory,
                                 if (isImportant) PriorityLevel.HIGH else PriorityLevel.MEDIUM,
                                 reminderTime,
+                                isDailyRecurring,
                                 emptyList()
                             )
                         }
@@ -634,10 +737,10 @@ fun TaskEditorBottomSheet(
                     modifier = Modifier.testTag("save_task_btn")
                 ) {
                     Text(
-                        text = "Save",
-                        fontSize = 17.sp,
+                        text = if (existingTask != null) "Update Reminder" else "Save Reminder",
+                        fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
-                        color = if (title.isNotBlank()) IosColorScheduled else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                        color = if (title.isNotBlank()) AuraIrisPrimary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
                     )
                 }
             }

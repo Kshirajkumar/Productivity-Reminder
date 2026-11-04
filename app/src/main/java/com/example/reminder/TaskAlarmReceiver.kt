@@ -9,7 +9,6 @@ import android.media.RingtoneManager
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import com.example.ChronoTaskApp
-import com.example.R
 import com.example.ui.reminder.ReminderAlertActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -42,13 +41,13 @@ class TaskAlarmReceiver : BroadcastReceiver() {
 
         when (action) {
             ACTION_TASK_REMINDER -> {
-                // Acquire temporary wake lock to ensure the device turns on and displays the alert
+                // Short partial CPU wake lock to ensure the notification with full-screen intent is posted
                 val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
                 val wakeLock = powerManager?.newWakeLock(
-                    PowerManager.FULL_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP or PowerManager.ON_AFTER_RELEASE,
-                    "ChronoTask:ReminderWakeLock"
+                    PowerManager.PARTIAL_WAKE_LOCK,
+                    "AuraTask:ReminderCpuWakeLock"
                 )
-                wakeLock?.acquire(5000L)
+                wakeLock?.acquire(3000L)
 
                 // 1. Full-Screen Intent for Samsung-style Reminder Activity
                 val fullScreenIntent = Intent(context, ReminderAlertActivity::class.java).apply {
@@ -96,13 +95,14 @@ class TaskAlarmReceiver : BroadcastReceiver() {
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
                 )
 
-                val soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+                val soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+                    ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
 
-                // Build High-Priority Heads-Up & Lockscreen Notification
+                // Build High-Priority Heads-Up & Lockscreen Notification with full-screen intent
                 val notification = NotificationCompat.Builder(context, ChronoTaskApp.REMINDER_CHANNEL_ID)
                     .setSmallIcon(android.R.drawable.ic_popup_reminder)
                     .setContentTitle(title)
-                    .setContentText(if (details.isNotBlank()) details else "Scheduled task reminder")
+                    .setContentText(if (details.isNotBlank()) details else "Scheduled reminder alert")
                     .setPriority(NotificationCompat.PRIORITY_MAX)
                     .setCategory(NotificationCompat.CATEGORY_ALARM)
                     .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
@@ -117,43 +117,18 @@ class TaskAlarmReceiver : BroadcastReceiver() {
 
                 val notificationId = if (taskId > 0) taskId.toInt() else 9999
                 notificationManager?.notify(notificationId, notification)
-
-                // Try to launch the full-screen activity directly as well
-                try {
-                    context.startActivity(fullScreenIntent)
-                } catch (e: Exception) {
-                    // Full-screen intent in notification handles this on locked/restricted states
-                }
             }
 
             ACTION_TASK_COMPLETE -> {
-                val notificationId = if (taskId > 0) taskId.toInt() else 9999
-                notificationManager?.cancel(notificationId)
-
-                if (taskId > 0) {
-                    CoroutineScope(Dispatchers.IO).launch {
-                        val repository = ChronoTaskApp.instance.repository
-                        repository.toggleTaskComplete(taskId, currentlyCompleted = false)
-                    }
+                CoroutineScope(Dispatchers.IO).launch {
+                    TaskReminderManager.completeTask(context, taskId)
                 }
             }
 
             ACTION_TASK_SNOOZE -> {
-                val notificationId = if (taskId > 0) taskId.toInt() else 9999
-                notificationManager?.cancel(notificationId)
-
                 val snoozeMins = intent.getIntExtra(EXTRA_SNOOZE_MINUTES, 15)
-                if (taskId > 0) {
-                    CoroutineScope(Dispatchers.IO).launch {
-                        val repository = ChronoTaskApp.instance.repository
-                        val newTime = repository.snoozeTask(taskId, snoozeMins)
-                        val task = repository.getTaskById(taskId)
-                        if (task != null) {
-                            ChronoTaskApp.instance.alarmScheduler.scheduleReminder(
-                                task.copy(reminderTimeMillis = newTime)
-                            )
-                        }
-                    }
+                CoroutineScope(Dispatchers.IO).launch {
+                    TaskReminderManager.snoozeTask(context, taskId, snoozeMins)
                 }
             }
         }

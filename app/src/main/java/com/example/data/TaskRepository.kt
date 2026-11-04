@@ -78,7 +78,14 @@ class TaskRepository(private val taskDao: TaskDao) {
                 set(Calendar.MILLISECOND, 0)
             }
             val startOfDay = cal.timeInMillis
-            val endOfDay = startOfDay + (24 * 60 * 60 * 1000L) - 1
+            val endCal = Calendar.getInstance().apply {
+                timeInMillis = startOfDay
+                set(Calendar.HOUR_OF_DAY, 23)
+                set(Calendar.MINUTE, 59)
+                set(Calendar.SECOND, 59)
+                set(Calendar.MILLISECOND, 999)
+            }
+            val endOfDay = endCal.timeInMillis
 
             val dayLabel = dayNames[cal.get(Calendar.DAY_OF_WEEK) - 1]
 

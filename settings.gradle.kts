@@ -22,6 +22,6 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "ChronoTask"
+rootProject.name = "AuraTask"
 
 include(":app")

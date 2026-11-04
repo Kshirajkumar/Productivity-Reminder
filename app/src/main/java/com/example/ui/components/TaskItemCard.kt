@@ -57,11 +57,13 @@ import androidx.compose.ui.unit.sp
 import com.example.data.PriorityLevel
 import com.example.data.Subtask
 import com.example.data.TaskEntity
-import com.example.ui.theme.IosColorCompleted
-import com.example.ui.theme.IosColorImportant
-import com.example.ui.theme.IosColorScheduled
-import com.example.ui.theme.IosColorToday
-import com.example.ui.theme.PriorityHigh
+import com.example.ui.theme.AuraAmberImportant
+import com.example.ui.theme.AuraEmeraldDone
+import com.example.ui.theme.AuraIrisPrimary
+import com.example.ui.theme.AuraRoseUrgent
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.ui.platform.LocalContext
+import com.example.ui.util.HapticHelper
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -72,9 +74,11 @@ fun TaskItemCard(
     onToggleComplete: () -> Unit,
     onDelete: () -> Unit,
     onSnooze15m: () -> Unit,
+    onEdit: (() -> Unit)? = null,
     onSubtaskToggle: ((Subtask) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     var expandedDetails by remember { mutableStateOf(false) }
     var menuExpanded by remember { mutableStateOf(false) }
 
@@ -116,13 +120,16 @@ fun TaskItemCard(
                     .size(26.dp)
                     .scale(checkScale)
                     .clip(CircleShape)
-                    .background(if (task.isCompleted) IosColorCompleted else Color.Transparent)
+                    .background(if (task.isCompleted) AuraEmeraldDone else Color.Transparent)
                     .border(
                         1.8.dp,
-                        if (task.isCompleted) IosColorCompleted else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                        if (task.isCompleted) AuraEmeraldDone else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                         CircleShape
                     )
-                    .clickable { onToggleComplete() }
+                    .clickable {
+                        HapticHelper.success(context)
+                        onToggleComplete()
+                    }
                     .testTag("task_checkbox_${task.id}"),
                 contentAlignment = Alignment.Center
             ) {
@@ -160,7 +167,7 @@ fun TaskItemCard(
                         Icon(
                             imageVector = Icons.Default.Star,
                             contentDescription = "Important",
-                            tint = IosColorImportant,
+                            tint = AuraAmberImportant,
                             modifier = Modifier.size(16.dp)
                         )
                     }
@@ -210,7 +217,7 @@ fun TaskItemCard(
                         Text(
                             text = "• Snoozed ${task.snoozeCount}x",
                             fontSize = 11.sp,
-                            color = IosColorImportant
+                            color = AuraAmberImportant
                         )
                     }
                 }
@@ -245,8 +252,8 @@ fun TaskItemCard(
                                         modifier = Modifier
                                             .size(18.dp)
                                             .clip(CircleShape)
-                                            .background(if (subtask.isDone) IosColorScheduled else Color.Transparent)
-                                            .border(1.2.dp, if (subtask.isDone) IosColorScheduled else MaterialTheme.colorScheme.onSurfaceVariant, CircleShape),
+                                            .background(if (subtask.isDone) AuraIrisPrimary else Color.Transparent)
+                                            .border(1.2.dp, if (subtask.isDone) AuraIrisPrimary else MaterialTheme.colorScheme.onSurfaceVariant, CircleShape),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         if (subtask.isDone) {
@@ -291,17 +298,27 @@ fun TaskItemCard(
                     onDismissRequest = { menuExpanded = false },
                     modifier = Modifier.background(MaterialTheme.colorScheme.surface)
                 ) {
+                    if (onEdit != null) {
+                        DropdownMenuItem(
+                            text = { Text("Edit Reminder") },
+                            leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null, tint = AuraIrisPrimary) },
+                            onClick = {
+                                menuExpanded = false
+                                onEdit()
+                            }
+                        )
+                    }
                     DropdownMenuItem(
                         text = { Text("Snooze 15 Mins") },
-                        leadingIcon = { Icon(Icons.Default.Snooze, contentDescription = null, tint = IosColorScheduled) },
+                        leadingIcon = { Icon(Icons.Default.Snooze, contentDescription = null, tint = AuraIrisPrimary) },
                         onClick = {
                             menuExpanded = false
                             onSnooze15m()
                         }
                     )
                     DropdownMenuItem(
-                        text = { Text("Delete Reminder", color = PriorityHigh) },
-                        leadingIcon = { Icon(Icons.Default.DeleteOutline, contentDescription = null, tint = PriorityHigh) },
+                        text = { Text("Delete Reminder", color = AuraRoseUrgent) },
+                        leadingIcon = { Icon(Icons.Default.DeleteOutline, contentDescription = null, tint = AuraRoseUrgent) },
                         onClick = {
                             menuExpanded = false
                             onDelete()

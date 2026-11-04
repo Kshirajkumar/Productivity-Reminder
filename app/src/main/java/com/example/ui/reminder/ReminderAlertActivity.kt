@@ -79,6 +79,9 @@ import com.example.ui.theme.SamsungDismissButtonBorder
 import com.example.ui.theme.SamsungSnoozePill
 import kotlinx.coroutines.launch
 
+import com.example.reminder.TaskReminderManager
+import com.example.ui.util.HapticHelper
+
 class ReminderAlertActivity : ComponentActivity() {
 
     private var ringtone: Ringtone? = null
@@ -104,33 +107,29 @@ class ReminderAlertActivity : ComponentActivity() {
                     category = category,
                     priority = priority,
                     onDismiss = {
+                        HapticHelper.click(this@ReminderAlertActivity)
                         stopAudioVibe()
                         dismissNotification(taskId)
                         finish()
                     },
                     onComplete = {
+                        HapticHelper.success(this@ReminderAlertActivity)
                         stopAudioVibe()
                         dismissNotification(taskId)
                         if (taskId > 0) {
-                            val repo = ChronoTaskApp.instance.repository
                             kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                                repo.toggleTaskComplete(taskId, currentlyCompleted = false)
+                                TaskReminderManager.completeTask(applicationContext, taskId)
                             }
                         }
                         finish()
                     },
                     onSnooze = { minutes ->
+                        HapticHelper.warning(this@ReminderAlertActivity)
                         stopAudioVibe()
                         dismissNotification(taskId)
                         if (taskId > 0) {
-                            val repo = ChronoTaskApp.instance.repository
-                            val scheduler = ChronoTaskApp.instance.alarmScheduler
                             kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                                val newTime = repo.snoozeTask(taskId, minutes)
-                                val task = repo.getTaskById(taskId)
-                                if (task != null) {
-                                    scheduler.scheduleReminder(task.copy(reminderTimeMillis = newTime))
-                                }
+                                TaskReminderManager.snoozeTask(applicationContext, taskId, minutes)
                             }
                         }
                         finish()

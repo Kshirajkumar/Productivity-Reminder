@@ -33,7 +33,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.ui.theme.IosColorScheduled
+import com.example.ui.theme.AuraIrisPrimary
 
 data class InAppBannerData(
     val id: Long,
@@ -62,7 +62,7 @@ fun InAppNotificationBanner(
                     .shadow(12.dp, RoundedCornerShape(20.dp))
                     .clip(RoundedCornerShape(20.dp))
                     .background(MaterialTheme.colorScheme.surface)
-                    .border(1.dp, IosColorScheduled.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
+                    .border(1.dp, AuraIrisPrimary.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
                     .clickable { onActionClick?.invoke() }
                     .padding(14.dp)
                     .testTag("in_app_notification_banner")
@@ -75,13 +75,13 @@ fun InAppNotificationBanner(
                         modifier = Modifier
                             .size(38.dp)
                             .clip(CircleShape)
-                            .background(IosColorScheduled.copy(alpha = 0.15f)),
+                            .background(AuraIrisPrimary.copy(alpha = 0.15f)),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = Icons.Default.NotificationsActive,
                             contentDescription = null,
-                            tint = IosColorScheduled,
+                            tint = AuraIrisPrimary,
                             modifier = Modifier.size(20.dp)
                         )
                     }

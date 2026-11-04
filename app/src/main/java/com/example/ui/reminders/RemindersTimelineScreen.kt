@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -19,16 +20,21 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -41,10 +47,13 @@ import com.example.data.PriorityLevel
 import com.example.data.TaskEntity
 import com.example.ui.components.InteractiveEmptyState
 import com.example.ui.components.TaskItemCard
-import com.example.ui.theme.IosColorImportant
-import com.example.ui.theme.IosColorScheduled
-import com.example.ui.theme.IosColorToday
-import com.example.ui.theme.PriorityHigh
+import com.example.ui.components.bounceClick
+import com.example.ui.dashboard.TaskEditorBottomSheet
+import com.example.ui.theme.AuraAmberImportant
+import com.example.ui.theme.AuraCyanAccent
+import com.example.ui.theme.AuraEmeraldDone
+import com.example.ui.theme.AuraIrisPrimary
+import com.example.ui.theme.AuraRoseUrgent
 import com.example.ui.viewmodel.TaskViewModel
 import java.util.Calendar
 
@@ -55,19 +64,36 @@ fun RemindersTimelineScreen(
     onOpenLivePreview: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    var showCreateSheet by remember { mutableStateOf(false) }
+    var editingTask by remember { mutableStateOf<TaskEntity?>(null) }
+
     val activeTasks = remember(tasks) {
         tasks.filter { !it.isCompleted }.sortedBy { it.reminderTimeMillis }
     }
 
     val now = System.currentTimeMillis()
-    val calendar = Calendar.getInstance()
-    calendar.set(Calendar.HOUR_OF_DAY, 0)
-    calendar.set(Calendar.MINUTE, 0)
-    calendar.set(Calendar.SECOND, 0)
-    calendar.set(Calendar.MILLISECOND, 0)
+    val calendar = Calendar.getInstance().apply {
+        set(Calendar.HOUR_OF_DAY, 0)
+        set(Calendar.MINUTE, 0)
+        set(Calendar.SECOND, 0)
+        set(Calendar.MILLISECOND, 0)
+    }
     val startOfToday = calendar.timeInMillis
-    val endOfToday = startOfToday + (24 * 60 * 60 * 1000L) - 1
-    val endOfTomorrow = endOfToday + (24 * 60 * 60 * 1000L)
+    val endOfToday = Calendar.getInstance().apply {
+        timeInMillis = startOfToday
+        set(Calendar.HOUR_OF_DAY, 23)
+        set(Calendar.MINUTE, 59)
+        set(Calendar.SECOND, 59)
+        set(Calendar.MILLISECOND, 999)
+    }.timeInMillis
+    val endOfTomorrow = Calendar.getInstance().apply {
+        timeInMillis = startOfToday
+        add(Calendar.DAY_OF_YEAR, 1)
+        set(Calendar.HOUR_OF_DAY, 23)
+        set(Calendar.MINUTE, 59)
+        set(Calendar.SECOND, 59)
+        set(Calendar.MILLISECOND, 999)
+    }.timeInMillis
 
     val todayReminders = activeTasks.filter { it.reminderTimeMillis in startOfToday..endOfToday }
     val tomorrowReminders = activeTasks.filter { it.reminderTimeMillis in (endOfToday + 1)..endOfTomorrow }
@@ -81,9 +107,59 @@ fun RemindersTimelineScreen(
     ) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = 100.dp)
+            contentPadding = PaddingValues(bottom = 110.dp)
         ) {
-            // Header Hero Banner with Samsung Reminder Test Triggers
+            // Prominent Page Heading
+            item {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 12.dp)
+                ) {
+                    Text(
+                        text = "TIMELINE",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp,
+                        color = AuraIrisPrimary
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "Scheduled",
+                            fontSize = 32.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onBackground
+                        )
+
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(AuraIrisPrimary.copy(alpha = 0.15f))
+                                .padding(horizontal = 10.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = "${activeTasks.size} active",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = AuraIrisPrimary
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Upcoming alarm-grade reminders and scheduled works",
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            // Quick Alarm Test Banner
             item {
                 RemindersHeroBanner(
                     activeCount = activeTasks.size,
@@ -95,11 +171,11 @@ fun RemindersTimelineScreen(
             if (activeTasks.isEmpty()) {
                 item {
                     InteractiveEmptyState(
-                        title = "No Pending Reminders",
-                        subtitle = "You are all caught up! Create a new task with a reminder or tap a starter template to test.",
-                        onCreateClick = { viewModel.triggerTestReminder(3) },
+                        title = "No Upcoming Reminders",
+                        subtitle = "You are all caught up! Tap '+ Add Reminder' below to set up an alarm.",
+                        onCreateClick = { showCreateSheet = true },
                         onTemplateClick = { template -> viewModel.addFromTemplate(template) },
-                        modifier = Modifier.padding(top = 20.dp)
+                        modifier = Modifier.padding(top = 10.dp)
                     )
                 }
             } else {
@@ -109,7 +185,7 @@ fun RemindersTimelineScreen(
                         TimelineSectionHeader(
                             title = "Overdue",
                             count = overdueReminders.size,
-                            color = PriorityHigh
+                            color = AuraRoseUrgent
                         )
                     }
                     items(overdueReminders, key = { it.id }) { task ->
@@ -131,7 +207,7 @@ fun RemindersTimelineScreen(
                         TimelineSectionHeader(
                             title = "Today",
                             count = todayReminders.size,
-                            color = IosColorToday
+                            color = AuraIrisPrimary
                         )
                     }
                     items(todayReminders, key = { it.id }) { task ->
@@ -141,6 +217,7 @@ fun RemindersTimelineScreen(
                                 onToggleComplete = { viewModel.toggleTaskComplete(task.id, task.isCompleted) },
                                 onDelete = { viewModel.deleteTask(task.id) },
                                 onSnooze15m = { viewModel.snoozeTask(task.id, 15) },
+                                onEdit = { editingTask = task },
                                 onSubtaskToggle = { subtask -> viewModel.toggleSubtask(task.id, subtask) }
                             )
                         }
@@ -153,7 +230,7 @@ fun RemindersTimelineScreen(
                         TimelineSectionHeader(
                             title = "Tomorrow",
                             count = tomorrowReminders.size,
-                            color = IosColorScheduled
+                            color = AuraCyanAccent
                         )
                     }
                     items(tomorrowReminders, key = { it.id }) { task ->
@@ -163,6 +240,7 @@ fun RemindersTimelineScreen(
                                 onToggleComplete = { viewModel.toggleTaskComplete(task.id, task.isCompleted) },
                                 onDelete = { viewModel.deleteTask(task.id) },
                                 onSnooze15m = { viewModel.snoozeTask(task.id, 15) },
+                                onEdit = { editingTask = task },
                                 onSubtaskToggle = { subtask -> viewModel.toggleSubtask(task.id, subtask) }
                             )
                         }
@@ -185,6 +263,7 @@ fun RemindersTimelineScreen(
                                 onToggleComplete = { viewModel.toggleTaskComplete(task.id, task.isCompleted) },
                                 onDelete = { viewModel.deleteTask(task.id) },
                                 onSnooze15m = { viewModel.snoozeTask(task.id, 15) },
+                                onEdit = { editingTask = task },
                                 onSubtaskToggle = { subtask -> viewModel.toggleSubtask(task.id, subtask) }
                             )
                         }
@@ -192,6 +271,63 @@ fun RemindersTimelineScreen(
                 }
             }
         }
+
+        // Floating Action Button to Add Reminder right from the Scheduled page
+        FloatingActionButton(
+            onClick = { showCreateSheet = true },
+            containerColor = AuraIrisPrimary,
+            contentColor = Color.White,
+            shape = CircleShape,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(bottom = 20.dp, end = 20.dp)
+                .size(56.dp)
+                .testTag("fab_add_scheduled_reminder")
+        ) {
+            Icon(
+                imageVector = Icons.Default.Add,
+                contentDescription = "Add new reminder",
+                modifier = Modifier.size(24.dp)
+            )
+        }
+    }
+
+    if (showCreateSheet) {
+        TaskEditorBottomSheet(
+            onDismissRequest = { showCreateSheet = false },
+            onSaveTask = { title, details, category, priority, reminderTime, isRecurring, subtasks ->
+                viewModel.addNewTask(
+                    title = title,
+                    details = details,
+                    category = category,
+                    priority = priority,
+                    reminderTimeMillis = reminderTime,
+                    isRecurringDaily = isRecurring,
+                    subtasks = subtasks
+                )
+                showCreateSheet = false
+            }
+        )
+    }
+
+    editingTask?.let { task ->
+        TaskEditorBottomSheet(
+            existingTask = task,
+            onDismissRequest = { editingTask = null },
+            onSaveTask = { title, details, category, priority, reminderTime, isRecurring, subtasks ->
+                viewModel.updateExistingTask(
+                    taskId = task.id,
+                    title = title,
+                    details = details,
+                    category = category,
+                    priority = priority,
+                    reminderTimeMillis = reminderTime,
+                    isRecurringDaily = isRecurring,
+                    subtasks = subtasks
+                )
+                editingTask = null
+            }
+        )
     }
 }
 
@@ -204,7 +340,7 @@ fun RemindersHeroBanner(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(16.dp)
+            .padding(horizontal = 16.dp, vertical = 6.dp)
             .clip(RoundedCornerShape(22.dp))
             .background(MaterialTheme.colorScheme.surface)
             .border(0.8.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f), RoundedCornerShape(22.dp))
@@ -218,23 +354,23 @@ fun RemindersHeroBanner(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     modifier = Modifier
-                        .size(42.dp)
+                        .size(40.dp)
                         .clip(CircleShape)
-                        .background(IosColorScheduled),
+                        .background(AuraIrisPrimary),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = Icons.Default.NotificationsActive,
                         contentDescription = null,
                         tint = Color.White,
-                        modifier = Modifier.size(22.dp)
+                        modifier = Modifier.size(20.dp)
                     )
                 }
                 Spacer(modifier = Modifier.width(12.dp))
                 Column {
                     Text(
-                        text = "Smart Reminders",
-                        fontSize = 18.sp,
+                        text = "Lockscreen Alarms",
+                        fontSize = 17.sp,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface
                     )
@@ -247,10 +383,10 @@ fun RemindersHeroBanner(
             }
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(10.dp))
 
         Text(
-            text = "When time triggers, the Samsung full-screen alert overlay wakes your device even when locked.",
+            text = "When time triggers, the full-screen alert overlay wakes your device even when locked.",
             fontSize = 13.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             lineHeight = 18.sp
@@ -265,10 +401,10 @@ fun RemindersHeroBanner(
             Button(
                 onClick = onTriggerTest5s,
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = IosColorScheduled,
+                    containerColor = AuraIrisPrimary,
                     contentColor = Color.White
                 ),
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(14.dp),
                 modifier = Modifier
                     .weight(1f)
                     .height(44.dp)
@@ -276,7 +412,7 @@ fun RemindersHeroBanner(
             ) {
                 Icon(Icons.Default.Alarm, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(6.dp))
-                Text("Alarm in 5s", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                Text("Test in 5s", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
             }
 
             Button(
@@ -285,7 +421,7 @@ fun RemindersHeroBanner(
                     containerColor = MaterialTheme.colorScheme.surfaceVariant,
                     contentColor = MaterialTheme.colorScheme.onSurface
                 ),
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(14.dp),
                 modifier = Modifier
                     .weight(1f)
                     .height(44.dp)

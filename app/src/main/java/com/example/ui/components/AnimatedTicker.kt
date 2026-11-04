@@ -1,12 +1,15 @@
 package com.example.ui.components
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.Spring
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -19,26 +22,30 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.TextUnit
+import com.example.ui.util.HapticHelper
 
 /**
- * Adds a tactile bounce animation to any clickable element.
- * Scales down to 0.94f when pressed and springs back when released.
+ * High-performance tactile bounce modifier for buttons and cards.
+ * Scales down smoothly on touch and springs back up with subtle haptic feedback.
  */
 @Composable
 fun Modifier.bounceClick(
-    scaleDown: Float = 0.94f,
+    scaleDown: Float = 0.96f,
+    enableHaptic: Boolean = true,
     onClick: () -> Unit
 ): Modifier {
+    val context = LocalContext.current
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
 
     val scale by animateFloatAsState(
         targetValue = if (isPressed) scaleDown else 1f,
         animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
+            dampingRatio = 0.75f,
             stiffness = Spring.StiffnessMedium
         ),
         label = "bounceScale"
@@ -49,12 +56,18 @@ fun Modifier.bounceClick(
         .clickable(
             interactionSource = interactionSource,
             indication = null,
-            onClick = onClick
+            onClick = {
+                if (enableHaptic) {
+                    HapticHelper.click(context)
+                }
+                onClick()
+            }
         )
 }
 
 /**
- * Animated Time Text that slides characters vertically when updating (e.g. 3:43 PM -> 3:44 PM).
+ * Optimized Animated Time Text.
+ * Smoothly slides up/down when updated, without per-character layout overhead.
  */
 @Composable
 fun AnimatedTimeText(
@@ -65,32 +78,26 @@ fun AnimatedTimeText(
     fontSize: TextUnit = TextUnit.Unspecified,
     fontWeight: FontWeight? = null
 ) {
-    Row(
-        modifier = modifier,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        timeString.forEachIndexed { index, char ->
-            AnimatedContent(
-                targetState = char,
-                transitionSpec = {
-                    slideInVertically(
+    AnimatedContent(
+        targetState = timeString,
+        transitionSpec = {
+            (slideInVertically(
+                animationSpec = spring(stiffness = Spring.StiffnessMedium)
+            ) { height -> height / 2 } + fadeIn(tween(150))) togetherWith
+                    (slideOutVertically(
                         animationSpec = spring(stiffness = Spring.StiffnessMedium)
-                    ) { height -> height } togetherWith
-                            slideOutVertically(
-                                animationSpec = spring(stiffness = Spring.StiffnessMedium)
-                            ) { height -> -height }
-                },
-                label = "char_$index"
-            ) { targetChar ->
-                Text(
-                    text = targetChar.toString(),
-                    style = style,
-                    color = color,
-                    fontSize = fontSize,
-                    fontWeight = fontWeight
-                )
-            }
-        }
+                    ) { height -> -height / 2 } + fadeOut(tween(150)))
+        },
+        label = "timeTextSlide",
+        modifier = modifier
+    ) { text ->
+        Text(
+            text = text,
+            style = style,
+            color = color,
+            fontSize = fontSize,
+            fontWeight = fontWeight
+        )
     }
 }
 
@@ -115,11 +122,11 @@ fun AnimatedNumberTicker(
             targetState = number,
             transitionSpec = {
                 if (targetState > initialState) {
-                    slideInVertically { height -> height } togetherWith
-                            slideOutVertically { height -> -height }
+                    (slideInVertically { height -> height } + fadeIn()) togetherWith
+                            (slideOutVertically { height -> -height } + fadeOut())
                 } else {
-                    slideInVertically { height -> -height } togetherWith
-                            slideOutVertically { height -> height }
+                    (slideInVertically { height -> -height } + fadeIn()) togetherWith
+                            (slideOutVertically { height -> height } + fadeOut())
                 }
             },
             label = "numberTicker"

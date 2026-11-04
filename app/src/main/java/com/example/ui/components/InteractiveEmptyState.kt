@@ -46,7 +46,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.PriorityLevel
 import com.example.data.TaskCategory
-import com.example.ui.theme.IosColorScheduled
+import com.example.ui.theme.AuraIrisPrimary
 
 data class StarterTemplate(
     val title: String,
@@ -97,14 +97,14 @@ fun InteractiveEmptyState(
                 .size(90.dp)
                 .scale(pulseScale)
                 .clip(CircleShape)
-                .background(IosColorScheduled.copy(alpha = 0.15f))
-                .border(1.5.dp, IosColorScheduled.copy(alpha = 0.35f), CircleShape),
+                .background(AuraIrisPrimary.copy(alpha = 0.15f))
+                .border(1.5.dp, AuraIrisPrimary.copy(alpha = 0.35f), CircleShape),
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 imageVector = Icons.Default.EventAvailable,
                 contentDescription = null,
-                tint = IosColorScheduled,
+                tint = AuraIrisPrimary,
                 modifier = Modifier.size(42.dp)
             )
         }
@@ -136,7 +136,7 @@ fun InteractiveEmptyState(
         Button(
             onClick = onCreateClick,
             colors = ButtonDefaults.buttonColors(
-                containerColor = IosColorScheduled,
+                containerColor = AuraIrisPrimary,
                 contentColor = Color.White
             ),
             shape = RoundedCornerShape(22.dp),
@@ -161,7 +161,7 @@ fun InteractiveEmptyState(
             Icon(
                 imageVector = Icons.Default.AutoAwesome,
                 contentDescription = null,
-                tint = IosColorScheduled,
+                tint = AuraIrisPrimary,
                 modifier = Modifier.size(15.dp)
             )
             Spacer(modifier = Modifier.width(6.dp))
